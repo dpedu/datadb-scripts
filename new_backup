@@ -1,0 +1,168 @@
+#!/usr/bin/env python3
+
+import os,sys,cgi
+from os import mkdir,rename,unlink
+from os.path import exists
+from os.path import join as pathjoin
+from common.cgi import parse_qs,parse_auth,start_response,fulltrace
+from common.datadb import DATADB_ROOT,DATADB_TMP
+from shutil import rmtree
+from subprocess import Popen,PIPE
+from time import time
+import traceback
+
+def rotate_backups(backup_dir, sync_prev=False, max_backups=5):
+    """
+    In the backup dir, cascade backups. (/1/ becomes /2/, /0/ becomes /1/, etc)
+    :param backup_dir: absolute path to dir containing the numbered dirs we will be rotating
+    :param sync_prev: if true, the previous backup's content will be copied to the newly create backup dir (0)
+    :param max_backups: Max number of dirs to keep
+    :returns: Full path of new data dir
+    """
+    
+    # Path to this profile's backup data dir
+    #profile_base_path = pathjoin(DATADB_ROOT, backupName, 'data')
+    
+    dirs = os.listdir(backup_dir)
+    
+    if len(dirs) > 0:
+        # If there are some dirs, rotate them
+        # Assume all items are dirs and all dirs are named numerically
+        dirs = sorted([int(d) for d in dirs])
+        dirs.reverse() # we now have [5, 4, 3, 2, 1, 0]
+        
+        for item in dirs:
+            if (item+1) >= max_backups:
+                rmtree(pathjoin(backup_dir, str(item)))
+                continue
+            
+            # Rotate each backup once
+            rename(
+                pathjoin(backup_dir, str(item)), 
+                pathjoin(backup_dir, str(item+1))
+            )
+    
+    # Create the new backup dir
+    new_backup_path = pathjoin(backup_dir, "0")
+    mkdir(new_backup_path)
+    mkdir(pathjoin(new_backup_path, "data"))
+    
+    prev_backup_path = pathjoin(backup_dir, "1")
+    
+    if sync_prev and exists(prev_backup_path):
+        # if we're using rsync let's cp -r the previous backup to the empty new dir. 
+        # this should save some network time rsyncing later
+        #copytree(prev_backup_path, new_backup_path)
+        cp = Popen(['rsync', '-avr', '--one-file-system', prev_backup_path+'/data/', new_backup_path+'/data/'],
+                   stdout=PIPE, stderr=PIPE)
+        cp.communicate()
+        
+    return new_backup_path+'/data/'
+
+
+def prepare_backup_dirs(backupName, sync_prev=False, max_backups=5):
+    """
+    Check and create dirs where backups under this name will go
+    :param backupName: name of backup profile
+    :param sync_prev: if true, the previous backup's content will be copied to the newly create backup dir (0)
+    :returns: absolute path to newly created backup dir (0)
+    """
+    #print("prepare_backup(%s, %s)" % (backupName, proto))
+    
+    # Ensure the following dir exists: <DATADB_ROOT>/<backup_name>/data/0/
+    backup_base_path = pathjoin(DATADB_ROOT, backupName)
+    if not exists(backup_base_path):
+        mkdir(backup_base_path)
+    
+    backup_data_path = pathjoin(backup_base_path, 'data')
+    if not exists(backup_data_path):
+        mkdir(backup_data_path)
+    
+    # Should always return bkname/data/0/data/
+    new_path = rotate_backups(backup_data_path, sync_prev=sync_prev, max_backups=max_backups)
+    
+    return new_path
+
+
+def handle_get_rsync(backupName, max_backups):
+    """
+    Prepare for an rsync backup transfer. Prints path to screen after preparing it.
+    :param backupName: name of backup profile
+    """
+    # Prepare new dir
+    new_target_dir = prepare_backup_dirs(backupName, sync_prev=True, max_backups=max_backups)
+    
+    # Print absolute path to screen. datadb client will use this path as the rsync dest
+    start_response()
+    print(new_target_dir)
+    
+    exit(0)
+
+
+def handle_put_archive(backupName, fileStream, max_backups):
+    """
+    Prepare and accept a new archive backup - a single tar.gz archive.
+    :param backupName: profile the new file will be added to
+    :param fileStream: file-like object to read archive data from, to disk
+    """
+    
+    # Temp file we will store data in as it is uploaded
+    tmp_fname = pathjoin(DATADB_TMP, "%s.tar.gz" % time())
+    
+    # Track uploaded data size
+    bk_size = 0
+    with open(tmp_fname, 'wb') as f:
+        while True:
+            data = fileStream.read(8192)
+            if not data:
+                break
+            bk_size += len(data)
+            f.write(data)
+    
+    # No data = assume something failed
+    if bk_size == 0:
+        unlink(tmp_fname)
+        raise Exception("No file uploaded...")
+    
+    new_target_dir = prepare_backup_dirs(backupName, max_backups=max_backups)
+    
+    # Move backup into place
+    rename(tmp_fname, pathjoin(new_target_dir, 'backup.tar.gz'))
+    
+    # Done
+    start_response() # send 200 response code
+    exit(0)
+
+
+def handle_req():
+    """
+    Parse http query parameters and act accordingly.
+    """
+    params = parse_qs()
+    
+    for param_name in ["proto", "name"]:
+        if not param_name in params:
+            raise Exception("Missing parameter: %s" % param_name)
+    
+    max_backups = int(params["keep"]) if "keep" in params else 5
+    assert max_backups > 0, "Must keep at least one backup"
+    
+    if os.environ['REQUEST_METHOD'] == "GET" and params["proto"] == "rsync":
+        # Rsync is always GET
+        handle_get_rsync(params["name"], max_backups)
+    
+    elif os.environ['REQUEST_METHOD'] == "PUT" and params["proto"] == "archive":
+        # Archive mode PUTs a file
+        handle_put_archive(params["name"], sys.stdin.buffer, max_backups)
+    
+    else:
+        raise Exception("Invalid request. Params: %s" % params)
+
+if __name__ == "__main__":
+    try:
+        handle_req()
+    except Exception as e:
+        start_response(status_code=("500", "Internal server error"))
+        
+        tb = traceback.format_exc()
+        print(tb)

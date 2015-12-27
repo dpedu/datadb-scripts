@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+
+import traceback
+from sys import exit,stdin,stdout
+import os
+from os.path import join as pathjoin
+from os.path import exists,getsize
+
+from common.cgi import parse_qs,parse_auth,start_response
+from common.datadb import DATADB_ROOT,DATADB_TMP
+
+
+def get_backup_dir(backup_name):
+    """
+    Get the absolute local path to a backup or raise an exception if none exists
+    :returns: str absolute path to backup seq /0/
+    """
+    backup_path = pathjoin(DATADB_ROOT, backup_name, 'data', '0', 'data')
+    
+    if not exists(backup_path):
+        raise Exception("Backup does not exist")
+    
+    return backup_path
+
+
+def handle_get_rsync(backup_name):
+    """
+    Prints the absolute path an rsync backup should pull from
+    """
+    backup_path = get_backup_dir(backup_name)
+    
+    start_response()
+    print(backup_path+'/')
+
+
+def handle_get_archive(backup_name):
+    """
+    Returns .tar.gz data to the browser
+    """
+    backup_path = pathjoin(get_backup_dir(backup_name), 'backup.tar.gz')
+    
+    with open(backup_path, 'rb') as f:
+        start_response(content_type="application/x-gzip", extra_headers=["Content-length: %s" % getsize(backup_path),
+                                                                         "Content-Disposition: attachment; filename=\"backup.tar.gz\""])
+        while True:
+            data = f.read(8192)
+            if not data:
+                break
+            stdout.buffer.write(data)
+    exit(0)
+
+
+def handle_req():
+    """
+    Parse http query parameters and act accordingly.
+    """
+    params = parse_qs()
+    
+    for param_name in ["proto", "name"]:
+        if not param_name in params:
+            raise Exception("Missing parameter: %s" % param_name)
+    
+    if os.environ['REQUEST_METHOD'] == "GET" and params["proto"] == "rsync":
+        # Should return absolute local path to latest backup dir
+        handle_get_rsync(params["name"])
+    
+    elif os.environ['REQUEST_METHOD'] == "GET" and params["proto"] == "archive":
+        # Should respond by transferring tar.gz data
+        handle_get_archive(params["name"])
+    
+    else:
+        raise Exception("Invalid request. Params: %s" % params)
+
+
+if __name__ == "__main__":
+    try:
+        handle_req()
+    except Exception as e:
+        start_response(status_code=("500", "Internal server error"))
+        
+        tb = traceback.format_exc()
+        print(tb)
+
