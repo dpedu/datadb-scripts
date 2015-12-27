@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 
 import os,sys,cgi
+import traceback
 from os import mkdir,rename,unlink
 from os.path import exists
 from os.path import join as pathjoin
-from common.cgi import parse_qs,parse_auth,start_response,fulltrace
+from common.cgi import parse_qs,parse_auth,start_response
 from common.datadb import DATADB_ROOT,DATADB_TMP
 from shutil import rmtree
 from subprocess import Popen,PIPE
 from time import time
-import traceback
+
 
 def rotate_backups(backup_dir, sync_prev=False, max_backups=5):
     """
@@ -157,6 +158,7 @@ def handle_req():
     
     else:
         raise Exception("Invalid request. Params: %s" % params)
+
 
 if __name__ == "__main__":
     try:
