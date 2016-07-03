@@ -2,7 +2,7 @@
 
 import os,sys,cgi
 import traceback
-from os import mkdir,rename,unlink,rmdir,utime
+from os import mkdir,rename,unlink,rmdir,utime,makedirs
 from os.path import exists
 from os.path import join as pathjoin
 from common.cgi import parse_qs,parse_auth,start_response
@@ -61,7 +61,7 @@ def rotate_backups(backup_dir, max_backups=5):
     return new_backup_path+'/data/'
 
 
-def prepare_backup_dirs(backup_name, max_backups=5):
+def prepare_backup_dirs(backup_name, max_backups=5, rotate=True):
     """
     Check and create dirs where backups under this name will go
     :param backup_name: name of backup profile
@@ -78,18 +78,32 @@ def prepare_backup_dirs(backup_name, max_backups=5):
     if not exists(backup_data_path):
         mkdir(backup_data_path)
     
-    # Should always return bkname/data/0/data/
-    new_path = rotate_backups(backup_data_path, max_backups=max_backups)
+    if rotate:
+        # Should always return bkname/data/0/data/
+        new_path = rotate_backups(backup_data_path, max_backups=max_backups)
+    else:
+        new_path = pathjoin(backup_data_path, '0', 'data') + '/'
+        if not exists(new_path):
+            makedirs(new_path)
     
     return new_path
 
 
-def handle_get_rsync(backup_name, sync_prev=False):
+def handle_get_rsync(backup_name, sync_prev=False, force_existing=False):
     """
     Prepare a temp dest dir for an incoming rsync backup
     :param backup_name: name of backup profile
     :param sync_prev: disk copy the previous backup that will be rsynced on top of to save bandwidth
+    :param force_existing: force using existing backups (ideal for single in-place backups of very large things)
     """
+
+    if force_existing:
+        backup_0 = prepare_backup_dirs(backup_name, max_backups=1, rotate=False)
+        # touch the backup dir
+        utime(get_backup_dir(backup_name))
+        start_response()
+        print(json.dumps([backup_0, None]))
+        exit(0)
 
     # generate random token
     now = int(time())
@@ -102,7 +116,7 @@ def handle_get_rsync(backup_name, sync_prev=False):
     os.mkdir(backup_dir)
 
     if sync_prev:
-        prev_path = os.path.join(get_backup_dir(backup_name), 'data', '0', 'data')
+        prev_path = pathjoin(get_backup_dir(backup_name), 'data', '0', 'data')
         if exists(prev_path):
             # if we're using rsync let's cp -r the previous backup to the empty new dir. 
             # this should save some network time rsyncing later
@@ -206,7 +220,7 @@ def handle_req():
     
     if os.environ['REQUEST_METHOD'] == "GET" and params["proto"] == "rsync":
         # Rsync prepare is GET
-        handle_get_rsync(params["name"], sync_prev=True)
+        handle_get_rsync(params["name"], sync_prev=True, force_existing="inplace" in params)
     
     elif os.environ['REQUEST_METHOD'] == "PUT" and params["proto"] == "rsync":
         # Rsync finalize is PUT
