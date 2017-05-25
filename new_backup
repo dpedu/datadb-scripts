@@ -6,7 +6,8 @@ from os import mkdir,rename,unlink,rmdir,utime,makedirs
 from os.path import exists
 from os.path import join as pathjoin
 from common.cgi import parse_qs,parse_auth,start_response
-from common.datadb import DATADB_ROOT,DATADB_TMP
+from common.datadb import DATADB_ROOT, DATADB_TMP, DATADB_DIR_TIMESTAMP_FORMAT
+from datetime import datetime
 from shutil import rmtree, move
 from subprocess import Popen,PIPE
 from random import randint
@@ -15,15 +16,18 @@ from hashlib import md5
 from glob import iglob
 import json
 
+
 def get_backup_dir(backup_name):
     """
     Returns path to this profile's backup base dir. The base dir contains the 'data' directory
     """
     return pathjoin(DATADB_ROOT, backup_name)
 
+
 def rotate_backups(backup_dir, max_backups=5):
     """
-    In the backup dir, cascade backups. (/1/ becomes /2/, /0/ becomes /1/, etc)
+    In the backup dir, cascade backups. List the backup dir and parse folder timestamps. Sort and delete old.
+    Create a symlink pointing to the newest backup
     :param backup_dir: absolute path to dir containing the numbered dirs we will be rotating
     :param max_backups: Max number of dirs to keep
     :returns: Full path of new data dir
@@ -32,32 +36,22 @@ def rotate_backups(backup_dir, max_backups=5):
     # Path to this profile's backup data dir
     #profile_base_path = pathjoin(DATADB_ROOT, backup_name, 'data')
     
-    dirs = os.listdir(backup_dir)
+    dirs = sorted([datetime.strptime(d, DATADB_DIR_TIMESTAMP_FORMAT) for d in os.listdir(backup_dir)])
+    dirs.reverse()
+    # we the list of dirs sorted newest to oldest
     
-    if len(dirs) > 0:
-        # If there are some dirs, rotate them
-        # Assume all items are dirs and all dirs are named numerically
-        dirs = sorted([int(d) for d in dirs])
-        dirs.reverse() # we now have [5, 4, 3, 2, 1, 0]
-        
-        for item in dirs:
-            if (item+1) >= max_backups:
-                rmtree(pathjoin(backup_dir, str(item)))
-                continue
-            
-            # Rotate each backup once
-            rename(
-                pathjoin(backup_dir, str(item)), 
-                pathjoin(backup_dir, str(item+1))
-            )
-    
+    if len(dirs) > max_backups:
+        for dirname in dirs[max_backups:]:
+            rmtree(pathjoin(backup_dir, dirname.strftime(DATADB_DIR_TIMESTAMP_FORMAT)))
+
+    return prepare_new_backup_dir(backup_dir)
+
+
+def prepare_new_backup_dir(backup_dir):
     # Create the new backup dir
-    new_backup_path = pathjoin(backup_dir, "0")
+    new_backup_path = pathjoin(backup_dir, datetime.now().strftime(DATADB_DIR_TIMESTAMP_FORMAT))
     mkdir(new_backup_path)
     mkdir(pathjoin(new_backup_path, "data"))
-    
-    prev_backup_path = pathjoin(backup_dir, "1")
-    
     return new_backup_path+'/data/'
 
 
@@ -82,9 +76,7 @@ def prepare_backup_dirs(backup_name, max_backups=5, rotate=True):
         # Should always return bkname/data/0/data/
         new_path = rotate_backups(backup_data_path, max_backups=max_backups)
     else:
-        new_path = pathjoin(backup_data_path, '0', 'data') + '/'
-        if not exists(new_path):
-            makedirs(new_path)
+        prepare_new_backup_dir(backup_data_path)
     
     return new_path
 

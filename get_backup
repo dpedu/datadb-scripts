@@ -6,20 +6,24 @@ from sys import exit,stdin,stdout
 from os.path import join as pathjoin
 from os.path import exists,getsize
 from common.cgi import parse_qs,parse_auth,start_response
-from common.datadb import DATADB_ROOT,DATADB_TMP
+from common.datadb import DATADB_ROOT, DATADB_TMP, DATADB_DIR_TIMESTAMP_FORMAT
+from datetime import datetime
 
 
 def get_backup_dir(backup_name):
     """
-    Get the absolute local path to a backup or raise an exception if none exists
+    Get the absolute local path to a backup or raise an exception if none exists. When getting a backup, sort folder
+    names (they're timestamps) and return newest.
     :returns: str absolute path to backup seq /0/
     """
-    backup_path = pathjoin(DATADB_ROOT, backup_name, 'data', '0', 'data')
+    backups_dir = pathjoin(DATADB_ROOT, backup_name, 'data')
     
-    if not exists(backup_path):
+    if not exists(backups_dir):
         raise Exception("Backup does not exist")
-    
-    return backup_path
+
+    dirs = sorted([datetime.strptime(d, DATADB_DIR_TIMESTAMP_FORMAT) for d in os.listdir(backups_dir)])
+
+    return os.path.join(backups_dir, dirs[-1].strftime(DATADB_DIR_TIMESTAMP_FORMAT), 'data')
 
 
 def handle_head(backup_name):
