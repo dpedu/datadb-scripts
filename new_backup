@@ -32,14 +32,14 @@ def rotate_backups(backup_dir, max_backups=5):
     :param max_backups: Max number of dirs to keep
     :returns: Full path of new data dir
     """
-    
+
     # Path to this profile's backup data dir
     #profile_base_path = pathjoin(DATADB_ROOT, backup_name, 'data')
-    
+
     dirs = sorted([datetime.strptime(d, DATADB_DIR_TIMESTAMP_FORMAT) for d in os.listdir(backup_dir)])
     dirs.reverse()
     # we the list of dirs sorted newest to oldest
-    
+
     if len(dirs) > max_backups:
         for dirname in dirs[max_backups:]:
             rmtree(pathjoin(backup_dir, dirname.strftime(DATADB_DIR_TIMESTAMP_FORMAT)))
@@ -62,22 +62,22 @@ def prepare_backup_dirs(backup_name, max_backups=5, rotate=True):
     :returns: absolute path to newly created backup dir (0)
     """
     #print("prepare_backup(%s, %s)" % (backup_name, proto))
-    
+
     # Ensure the following dir exists: <DATADB_ROOT>/<backup_name>/data/0/
     backup_base_path = get_backup_dir(backup_name)
     if not exists(backup_base_path):
         mkdir(backup_base_path)
-    
+
     backup_data_path = pathjoin(backup_base_path, 'data')
     if not exists(backup_data_path):
         mkdir(backup_data_path)
-    
+
     if rotate:
         # Should always return bkname/data/0/data/
         new_path = rotate_backups(backup_data_path, max_backups=max_backups)
     else:
-        prepare_new_backup_dir(backup_data_path)
-    
+        new_path = prepare_new_backup_dir(backup_data_path)
+
     return new_path
 
 
@@ -110,7 +110,7 @@ def handle_get_rsync(backup_name, sync_prev=False, force_existing=False):
     if sync_prev:
         prev_path = pathjoin(get_backup_dir(backup_name), 'data', '0', 'data')
         if exists(prev_path):
-            # if we're using rsync let's cp -r the previous backup to the empty new dir. 
+            # if we're using rsync let's cp -r the previous backup to the empty new dir.
             # this should save some network time rsyncing later
             #copytree(prev_backup_path, new_backup_path)
             cp = Popen(['rsync', '-avr', '--one-file-system', prev_path+'/', backup_dir+'/'],
@@ -165,10 +165,10 @@ def handle_put_archive(backup_name, fileStream, max_backups):
     :param backup_name: profile the new file will be added to
     :param fileStream: file-like object to read archive data from, to disk
     """
-    
+
     # Temp file we will store data in as it is uploaded
     tmp_fname = pathjoin(DATADB_TMP, "%s.tar.gz" % time())
-    
+
     # Track uploaded data size
     bk_size = 0
     with open(tmp_fname, 'wb') as f:
@@ -178,20 +178,20 @@ def handle_put_archive(backup_name, fileStream, max_backups):
                 break
             bk_size += len(data)
             f.write(data)
-    
+
     # No data = assume something failed
     if bk_size == 0:
         unlink(tmp_fname)
         raise Exception("No file uploaded...")
-    
+
     new_target_dir = prepare_backup_dirs(backup_name, max_backups=max_backups)
-    
+
     # Move backup into place
     rename(tmp_fname, pathjoin(new_target_dir, 'backup.tar.gz'))
-    
+
     # touch the backup dir
     utime(get_backup_dir(backup_name))
-    
+
     # Done
     start_response() # send 200 response code
     exit(0)
@@ -202,26 +202,26 @@ def handle_req():
     Parse http query parameters and act accordingly.
     """
     params = parse_qs()
-    
+
     for param_name in ["proto", "name"]:
         if not param_name in params:
             raise Exception("Missing parameter: %s" % param_name)
-    
+
     max_backups = int(params["keep"]) if "keep" in params else 5
     assert max_backups > 0, "Must keep at least one backup"
-    
+
     if os.environ['REQUEST_METHOD'] == "GET" and params["proto"] == "rsync":
         # Rsync prepare is GET
         handle_get_rsync(params["name"], sync_prev=True, force_existing="inplace" in params)
-    
+
     elif os.environ['REQUEST_METHOD'] == "PUT" and params["proto"] == "rsync":
         # Rsync finalize is PUT
         handle_put_rsync(params["name"], params["token"], max_backups)
-    
+
     elif os.environ['REQUEST_METHOD'] == "PUT" and params["proto"] == "archive":
         # Archive mode PUTs a file
         handle_put_archive(params["name"], sys.stdin.buffer, max_backups)
-    
+
     else:
         raise Exception("Invalid request. Params: %s" % params)
 
@@ -231,6 +231,6 @@ if __name__ == "__main__":
         handle_req()
     except Exception as e:
         start_response(status_code=("500", "Internal server error"))
-        
+
         tb = traceback.format_exc()
         print(tb)
