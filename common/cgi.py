@@ -21,13 +21,14 @@ def parse_qs():
     GET = {}
     if "QUERY_STRING" in os.environ:
         GET = _parse_qs(os.environ["QUERY_STRING"])
-        GET = {k:v[0] for k,v in GET.items()}
+        GET = {k: v[0] for k, v in GET.items()}
     return GET
 
 
 class HTTPBasicAuth:
     username = None
     password = None
+
     def __str__(self):
         return "<HTTPBasicAuth object username='%s' password='%s'>" % (self.username, self.password)
 

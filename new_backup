@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 
-import os,sys,cgi
+import os
+import sys
 import traceback
-from os import mkdir,rename,unlink,rmdir,utime,makedirs
+from os import mkdir, rename, unlink, rmdir, utime
 from os.path import exists
 from os.path import join as pathjoin
-from common.cgi import parse_qs,parse_auth,start_response
+from common.cgi import parse_qs, parse_auth, start_response
 from common.datadb import DATADB_ROOT, DATADB_TMP, DATADB_DIR_TIMESTAMP_FORMAT
 from datetime import datetime
 from shutil import rmtree, move
-from subprocess import Popen,PIPE
+from subprocess import Popen, PIPE
 from random import randint
 from time import time
 from hashlib import md5
@@ -34,7 +35,7 @@ def rotate_backups(backup_dir, max_backups=5):
     """
 
     # Path to this profile's backup data dir
-    #profile_base_path = pathjoin(DATADB_ROOT, backup_name, 'data')
+    # profile_base_path = pathjoin(DATADB_ROOT, backup_name, 'data')
 
     dirs = sorted([datetime.strptime(d, DATADB_DIR_TIMESTAMP_FORMAT) for d in os.listdir(backup_dir)])
     dirs.reverse()
@@ -52,7 +53,7 @@ def prepare_new_backup_dir(backup_dir):
     new_backup_path = pathjoin(backup_dir, datetime.now().strftime(DATADB_DIR_TIMESTAMP_FORMAT))
     mkdir(new_backup_path)
     mkdir(pathjoin(new_backup_path, "data"))
-    return new_backup_path+'/data/'
+    return new_backup_path + '/data/'
 
 
 def prepare_backup_dirs(backup_name, max_backups=5, rotate=True):
@@ -61,7 +62,7 @@ def prepare_backup_dirs(backup_name, max_backups=5, rotate=True):
     :param backup_name: name of backup profile
     :returns: absolute path to newly created backup dir (0)
     """
-    #print("prepare_backup(%s, %s)" % (backup_name, proto))
+    # print("prepare_backup(%s, %s)" % (backup_name, proto))
 
     # Ensure the following dir exists: <DATADB_ROOT>/<backup_name>/data/0/
     backup_base_path = get_backup_dir(backup_name)
@@ -193,7 +194,7 @@ def handle_put_archive(backup_name, fileStream, max_backups):
     utime(get_backup_dir(backup_name))
 
     # Done
-    start_response() # send 200 response code
+    start_response()  # send 200 response code
     exit(0)
 
 
@@ -204,7 +205,7 @@ def handle_req():
     params = parse_qs()
 
     for param_name in ["proto", "name"]:
-        if not param_name in params:
+        if param_name not in params:
             raise Exception("Missing parameter: %s" % param_name)
 
     max_backups = int(params["keep"]) if "keep" in params else 5
