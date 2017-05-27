@@ -4,31 +4,14 @@ import traceback
 import os
 from sys import exit, stdout
 from os.path import join as pathjoin
-from os.path import exists, getsize
+from os.path import getsize
 from common.cgi import parse_qs, parse_auth, start_response
-from common.datadb import DATADB_ROOT, DATADB_DIR_TIMESTAMP_FORMAT
-from datetime import datetime
-
-
-def get_backup_dir(backup_name):
-    """
-    Get the absolute local path to a backup or raise an exception if none exists. When getting a backup, sort folder
-    names (they're timestamps) and return newest.
-    :returns: str absolute path to backup seq /0/
-    """
-    backups_dir = pathjoin(DATADB_ROOT, backup_name, 'data')
-
-    if not exists(backups_dir):
-        raise Exception("Backup does not exist")
-
-    dirs = sorted([datetime.strptime(d, DATADB_DIR_TIMESTAMP_FORMAT) for d in os.listdir(backups_dir)])
-
-    return os.path.join(backups_dir, dirs[-1].strftime(DATADB_DIR_TIMESTAMP_FORMAT), 'data')
+from common.datadb import get_latest_backup
 
 
 def handle_head(backup_name):
     try:
-        # backup_path = get_backup_dir(backup_name)
+        # backup_path = get_latest_backup(backup_name)
         # TODO appropriate content-length for HEAD
         start_response(extra_headers=['Content-length: 0'])
     except:
@@ -40,7 +23,7 @@ def handle_get_rsync(backup_name):
     """
     Prints the absolute path an rsync backup should pull from
     """
-    backup_path = get_backup_dir(backup_name)
+    backup_path = get_latest_backup(backup_name)
 
     start_response()
     print(backup_path + '/')
@@ -50,7 +33,7 @@ def handle_get_archive(backup_name):
     """
     Returns .tar.gz data to the browser
     """
-    backup_path = pathjoin(get_backup_dir(backup_name), 'backup.tar.gz')
+    backup_path = pathjoin(get_latest_backup(backup_name), 'backup.tar.gz')
 
     with open(backup_path, 'rb') as f:
         start_response(content_type="application/x-gzip",

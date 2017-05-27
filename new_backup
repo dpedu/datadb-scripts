@@ -7,7 +7,8 @@ from os import mkdir, rename, unlink, rmdir, utime
 from os.path import exists
 from os.path import join as pathjoin
 from common.cgi import parse_qs, parse_auth, start_response
-from common.datadb import DATADB_ROOT, DATADB_TMP, DATADB_DIR_TIMESTAMP_FORMAT
+from common.datadb import DATADB_ROOT, DATADB_TMP, DATADB_DIR_TIMESTAMP_FORMAT, get_backup_dir, get_latest_backup, \
+    NoBackupException
 from datetime import datetime
 from shutil import rmtree, move
 from subprocess import Popen, PIPE
@@ -16,13 +17,6 @@ from time import time
 from hashlib import md5
 from glob import iglob
 import json
-
-
-def get_backup_dir(backup_name):
-    """
-    Returns path to this profile's backup base dir. The base dir contains the 'data' directory
-    """
-    return pathjoin(DATADB_ROOT, backup_name)
 
 
 def rotate_backups(backup_dir, max_backups=5):
@@ -64,7 +58,7 @@ def prepare_backup_dirs(backup_name, max_backups=5, rotate=True):
     """
     # print("prepare_backup(%s, %s)" % (backup_name, proto))
 
-    # Ensure the following dir exists: <DATADB_ROOT>/<backup_name>/data/0/
+    # Ensure the following dir exists: <DATADB_ROOT>/<backup_name>/data/
     backup_base_path = get_backup_dir(backup_name)
     if not exists(backup_base_path):
         mkdir(backup_base_path)
@@ -73,13 +67,15 @@ def prepare_backup_dirs(backup_name, max_backups=5, rotate=True):
     if not exists(backup_data_path):
         mkdir(backup_data_path)
 
-    if rotate:
-        # Should always return bkname/data/0/data/
-        new_path = rotate_backups(backup_data_path, max_backups=max_backups)
-    else:
-        new_path = prepare_new_backup_dir(backup_data_path)
+    if not rotate:
+        # Get the path to the latest backup if using in place mode
+        # If no backup is found, we'll call the rotate function anyway to get one created
+        try:
+            return get_latest_backup(backup_name)
+        except NoBackupException:
+            pass
 
-    return new_path
+    return rotate_backups(backup_data_path, max_backups=max_backups)
 
 
 def handle_get_rsync(backup_name, sync_prev=False, force_existing=False):
